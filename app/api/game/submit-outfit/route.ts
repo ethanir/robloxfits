@@ -273,7 +273,7 @@ export async function POST(req: Request) {
       data: {
         name: outfitName ?? null,
         buildJson: JSON.stringify(resolvedItems),
-        customImage: avatarThumbnailUrl, // Full avatar render as the preview
+        customImage: null, // Full avatar render as the preview
         isPublic: true, // Game-submitted outfits default to public
         voteScore: 0,
         ownerId: user.id,
