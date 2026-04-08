@@ -56,7 +56,6 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import {
   resolveOutfitItems,
-  fetchUserAvatarThumbnail,
   type CategoryKey,
 } from '@/lib/roblox';
 
@@ -263,17 +262,18 @@ export async function POST(req: Request) {
     // (name, thumbnail URL, price, etc.) from Roblox's servers.
     const resolvedItems = await resolveOutfitItems(items);
 
-    // --- Fetch the player's avatar thumbnail as the outfit preview ---
-    // Since the player is wearing this outfit in-game at submission time,
-    // their avatar thumbnail will show the complete outfit render.
-    const avatarThumbnailUrl = await fetchUserAvatarThumbnail(robloxUserId);
+    // --- Use screenshot from game if provided, otherwise skip ---
+    const screenshotUrl =
+      typeof (body as Record<string, unknown>).screenshotUrl === 'string'
+        ? ((body as Record<string, unknown>).screenshotUrl as string)
+        : null;
 
     // --- Save the outfit to the database ---
     const outfit = await prisma.outfit.create({
       data: {
         name: outfitName ?? null,
         buildJson: JSON.stringify(resolvedItems),
-        customImage: null, // Full avatar render as the preview
+        customImage: screenshotUrl, // Screenshot captured in-game via CaptureService
         isPublic: true, // Game-submitted outfits default to public
         voteScore: 0,
         ownerId: user.id,
@@ -296,7 +296,7 @@ export async function POST(req: Request) {
           owner: outfit.owner.username,
           isPublic: outfit.isPublic,
           voteScore: outfit.voteScore,
-          avatarThumbnailUrl,
+          screenshotUrl,
         },
       },
       { status: 201 },
