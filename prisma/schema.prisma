@@ -1,4 +1,19 @@
-// prisma/schema.prisma
+/**
+ * prisma/schema.prisma
+ *
+ * Database schema for robloxfits.com
+ *
+ * Models:
+ *   - User:   Website accounts, optionally linked to a Roblox account
+ *   - Outfit: Saved outfit builds (from website builder or Roblox game)
+ *
+ * The schema supports two outfit creation flows:
+ *   1. Website builder: User manually selects items from the catalog UI
+ *   2. Roblox game:     Player builds an outfit in-game and submits via API
+ *
+ * Both flows store outfits in the same format so they appear on the same
+ * leaderboard and can be voted on identically.
+ */
 
 generator client {
   provider = "prisma-client-js"
@@ -9,21 +24,29 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/// A user account on robloxfits.com.
+/// Can be created via the website signup form or automatically when
+/// a player submits an outfit from the Roblox game.
 model User {
-  id        Int      @id @default(autoincrement())
-  username  String   @unique
-  password  String
-  outfits   Outfit[]
-  createdAt DateTime @default(now())
+  id           Int      @id @default(autoincrement())
+  username     String   @unique
+  password     String
+  robloxUserId BigInt?  @unique  /// Linked Roblox account ID (null if not linked)
+  outfits      Outfit[]
+  createdAt    DateTime @default(now())
 }
 
+/// A saved outfit combination.
+/// Contains the full item data (IDs, names, thumbnails, prices) for each
+/// category slot, plus an optional preview image and community vote score.
 model Outfit {
   id          Int      @id @default(autoincrement())
-  name        String?
-  buildJson   String
-  customImage String?  // <- base64 data URL for the uploaded image
-  isPublic    Boolean  @default(false)
-  voteScore   Int      @default(0)
+  name        String?                          /// Player-chosen outfit name
+  buildJson   String                           /// JSON-serialized Record<CategoryKey, CatalogItem | null>
+  customImage String?                          /// Preview image URL (avatar thumbnail or uploaded base64)
+  isPublic    Boolean  @default(false)         /// Whether this outfit appears on the public leaderboard
+  voteScore   Int      @default(0)             /// Net community vote score (upvotes - downvotes)
+  source      String   @default("website")     /// Origin: "website" (built in browser) or "game" (submitted from Roblox)
   owner       User     @relation(fields: [ownerId], references: [id])
   ownerId     Int
   createdAt   DateTime @default(now())
