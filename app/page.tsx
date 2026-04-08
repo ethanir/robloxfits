@@ -2,10 +2,6 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
 type RobloxCatalogItem = {
   id: number;
   name: string;
@@ -60,77 +56,10 @@ type ApiOutfit = {
   customImageUrl?: string | null;
 };
 
-// ---------------------------------------------------------------------------
-// Outfit Preview Component
-// ---------------------------------------------------------------------------
-
-function OutfitThumbnailGrid({
-  build,
-  customImageUrl,
-}: {
-  build: BuildState;
-  customImageUrl?: string;
-}) {
-  if (customImageUrl) {
-    return (
-      <img
-        src={customImageUrl}
-        alt="Outfit preview"
-        className="w-full aspect-square object-cover rounded-xl"
-      />
-    );
-  }
-
-  const slots: { key: CategoryKey; label: string }[] = [
-    { key: 'hat', label: 'Hat' },
-    { key: 'hair', label: 'Hair' },
-    { key: 'face', label: 'Face' },
-    { key: 'shirt', label: 'Shirt' },
-    { key: 'pants', label: 'Pants' },
-    { key: 'shoes', label: 'Shoes' },
-    { key: 'accessory1', label: 'Acc 1' },
-    { key: 'accessory2', label: 'Acc 2' },
-  ];
-
-  return (
-    <div className="w-full rounded-xl bg-zinc-900/80 border border-zinc-800/50 p-2">
-      <div className="grid grid-cols-4 gap-1.5">
-        {slots.map(({ key, label }) => {
-          const item = build[key];
-          return (
-            <div
-              key={key}
-              className="aspect-square rounded-lg bg-zinc-800/50 overflow-hidden flex items-center justify-center"
-              title={item ? item.name : label}
-            >
-              {item?.thumbnailUrl ? (
-                <img
-                  src={item.thumbnailUrl}
-                  alt={item.name}
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                <span className="text-[8px] text-zinc-600 font-medium">
-                  {label}
-                </span>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Main Page
-// ---------------------------------------------------------------------------
-
 export default function HomePage() {
   const [outfits, setOutfits] = useState<SavedBuild[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Vote persistence using localStorage (keyed by visitorId)
   const [visitorId] = useState(() => {
     if (typeof window === 'undefined') return 'anon';
     let id = window.localStorage.getItem('rdh_visitor_id');
@@ -141,7 +70,6 @@ export default function HomePage() {
     return id;
   });
 
-  // Load outfits
   useEffect(() => {
     async function fetchOutfits() {
       try {
@@ -150,12 +78,9 @@ export default function HomePage() {
 
         const data = (await res.json()) as { outfits: ApiOutfit[] };
 
-        // Load persisted votes
         let votesMap: Record<string, 'up' | 'down'> = {};
         try {
-          const stored = window.localStorage.getItem(
-            `rdh_votes_${visitorId}`,
-          );
+          const stored = window.localStorage.getItem(`rdh_votes_${visitorId}`);
           if (stored) votesMap = JSON.parse(stored);
         } catch {}
 
@@ -184,8 +109,7 @@ export default function HomePage() {
   }, [visitorId]);
 
   const sortedOutfits = useMemo(
-    () =>
-      [...outfits].sort((a, b) => (b.voteScore ?? 0) - (a.voteScore ?? 0)),
+    () => [...outfits].sort((a, b) => (b.voteScore ?? 0) - (a.voteScore ?? 0)),
     [outfits],
   );
 
@@ -216,32 +140,17 @@ export default function HomePage() {
         const prevScore = voteScore;
 
         if (direction === 'up') {
-          if (userVote === 'up') {
-            voteScore -= 1;
-            userVote = null;
-          } else if (userVote === 'down') {
-            voteScore += 2;
-            userVote = 'up';
-          } else {
-            voteScore += 1;
-            userVote = 'up';
-          }
+          if (userVote === 'up') { voteScore -= 1; userVote = null; }
+          else if (userVote === 'down') { voteScore += 2; userVote = 'up'; }
+          else { voteScore += 1; userVote = 'up'; }
         } else {
-          if (userVote === 'down') {
-            voteScore += 1;
-            userVote = null;
-          } else if (userVote === 'up') {
-            voteScore -= 2;
-            userVote = 'down';
-          } else {
-            voteScore -= 1;
-            userVote = 'down';
-          }
+          if (userVote === 'down') { voteScore += 1; userVote = null; }
+          else if (userVote === 'up') { voteScore -= 2; userVote = 'down'; }
+          else { voteScore -= 1; userVote = 'down'; }
         }
 
         deltaForServer = voteScore - prevScore;
         persistVote(outfitId, userVote);
-
         return { ...outfit, voteScore, userVote };
       });
 
@@ -268,10 +177,8 @@ export default function HomePage() {
             </div>
             <h1 className="text-xl font-bold tracking-tight">RobloxFits</h1>
           </div>
-          <div className="flex items-center gap-4 text-sm text-zinc-400">
-            <span className="hidden sm:inline">
-              Build outfits in Roblox • Vote for the best drip
-            </span>
+          <div className="text-sm text-zinc-400 hidden sm:block">
+            Build outfits in Roblox • Vote for the best drip
           </div>
         </div>
       </header>
@@ -287,9 +194,7 @@ export default function HomePage() {
       {/* Outfit List */}
       <div className="max-w-6xl mx-auto px-6 pb-20">
         {loading ? (
-          <div className="text-center py-20 text-zinc-500">
-            Loading outfits...
-          </div>
+          <div className="text-center py-20 text-zinc-500">Loading outfits...</div>
         ) : sortedOutfits.length === 0 ? (
           <div className="text-center py-20">
             <div className="text-zinc-500 text-lg">No outfits yet</div>
@@ -302,16 +207,13 @@ export default function HomePage() {
             {sortedOutfits.map((outfit, index) => {
               const totalPrice = CATEGORY_DEFS.reduce((sum, { key }) => {
                 const item = outfit.build[key];
-                if (item && typeof item.price === 'number')
-                  return sum + item.price;
+                if (item && typeof item.price === 'number') return sum + item.price;
                 return sum;
               }, 0);
 
               const score = outfit.voteScore ?? 0;
               const userVote = outfit.userVote ?? null;
-              const filledItems = CATEGORY_DEFS.filter(
-                ({ key }) => outfit.build[key] !== null,
-              );
+              const hasScreenshot = !!outfit.customImageUrl;
 
               return (
                 <div
@@ -340,7 +242,6 @@ export default function HomePage() {
                           {totalPrice.toLocaleString()} R$
                         </div>
                       )}
-
                       <div className="flex items-center gap-1.5">
                         <button
                           type="button"
@@ -355,11 +256,7 @@ export default function HomePage() {
                         </button>
                         <div
                           className={`min-w-[2.5rem] text-center text-sm font-bold tabular-nums ${
-                            score > 0
-                              ? 'text-emerald-400'
-                              : score < 0
-                                ? 'text-red-400'
-                                : 'text-zinc-500'
+                            score > 0 ? 'text-emerald-400' : score < 0 ? 'text-red-400' : 'text-zinc-500'
                           }`}
                         >
                           {score}
@@ -379,9 +276,25 @@ export default function HomePage() {
                     </div>
                   </div>
 
-                  {/* Card Body — Items Grid */}
-                  <div className="p-5">
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {/* Card Body */}
+                  <div className="p-5 flex flex-col md:flex-row gap-5">
+                    {/* Screenshot preview (if available) */}
+                    {hasScreenshot && (
+                      <div className="flex-shrink-0">
+                        <img
+                          src={outfit.customImageUrl}
+                          alt={outfit.name || 'Outfit preview'}
+                          className="w-full md:w-52 aspect-square object-cover rounded-xl border border-zinc-800/50"
+                        />
+                      </div>
+                    )}
+
+                    {/* Items Grid */}
+                    <div
+                      className={`flex-1 grid grid-cols-2 ${
+                        hasScreenshot ? 'lg:grid-cols-4' : 'sm:grid-cols-4'
+                      } gap-3`}
+                    >
                       {CATEGORY_DEFS.map(({ key, label }) => {
                         const item = outfit.build[key];
 
@@ -398,9 +311,7 @@ export default function HomePage() {
                                 <div className="text-[10px] uppercase tracking-wider text-zinc-600 font-medium">
                                   {label}
                                 </div>
-                                <div className="text-[11px] text-zinc-600">
-                                  None
-                                </div>
+                                <div className="text-[11px] text-zinc-600">None</div>
                               </div>
                             </div>
                           );
