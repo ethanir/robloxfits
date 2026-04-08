@@ -1,61 +1,16 @@
 /**
  * app/api/game/submit-outfit/route.ts
  *
- * API endpoint for receiving outfit submissions from the Roblox game.
- *
- * When a player builds an outfit in the Roblox experience and hits "Submit",
- * the game sends the selected item IDs (per category) to this endpoint.
- * The server then:
- *   1. Validates the request and authenticates via API key
- *   2. Resolves each item ID into full catalog details (name, thumbnail, price)
- *   3. Optionally fetches the player's avatar thumbnail as a preview image
- *   4. Saves the outfit to the database, linked to the player's account
- *
- * Authentication:
- *   - The Roblox game authenticates using a shared API key (GAME_API_KEY env var)
- *   - The player is identified by their Roblox user ID
- *   - If the player has linked their Roblox account to a website account,
- *     the outfit is saved under their website user
- *   - If not linked, a placeholder user is created with their Roblox username
- *
- * Request body:
- * {
- *   "apiKey": string,                  // Shared secret for game authentication
- *   "robloxUserId": number,            // The submitting player's Roblox user ID
- *   "robloxUsername": string,           // The submitting player's Roblox display name
- *   "outfitName": string (optional),    // Player-chosen name for the outfit
- *   "items": {                          // Asset IDs for each outfit slot
- *     "hat": number | null,
- *     "hair": number | null,
- *     "face": number | null,
- *     "shirt": number | null,
- *     "pants": number | null,
- *     "shoes": number | null,
- *     "accessory1": number | null,
- *     "accessory2": number | null
- *   }
- * }
- *
- * Response (201 Created):
- * {
- *   "success": true,
- *   "outfit": {
- *     "id": number,
- *     "name": string | null,
- *     "owner": string,
- *     "isPublic": boolean,
- *     "voteScore": number,
- *     "avatarThumbnailUrl": string | null
- *   }
- * }
- *
- * @module api/game/submit-outfit
+ * Receives outfit submissions from the Roblox game.
+ * The game sends full item data (name, price) so we don't need to
+ * re-fetch from the flaky Roblox Economy API. We only fetch
+ * web-compatible thumbnail URLs since the game uses rbxthumb:// URIs.
  */
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import {
-  resolveOutfitItems,
+  fetchAssetThumbnails,
   type CategoryKey,
 } from '@/lib/roblox';
 
@@ -63,103 +18,66 @@ import {
 // Types
 // ---------------------------------------------------------------------------
 
-/** Expected shape of the incoming request body from the Roblox game. */
-interface GameSubmitRequest {
-  apiKey: string;
-  robloxUserId: number;
-  robloxUsername: string;
-  outfitName?: string;
-  items: Partial<Record<CategoryKey, number | null>>;
-}
+type GameItem = {
+  id: number;
+  name?: string;
+  price?: number | null;
+  thumbnailUrl?: string;
+};
 
-// ---------------------------------------------------------------------------
-// Validation Helpers
-// ---------------------------------------------------------------------------
+type GameItemsMap = Partial<Record<CategoryKey, GameItem | number | null>>;
 
-/** All valid category keys that can appear in the items object. */
 const VALID_CATEGORIES: CategoryKey[] = [
-  'hat',
-  'hair',
-  'face',
-  'shirt',
-  'pants',
-  'shoes',
-  'accessory1',
-  'accessory2',
+  'hat', 'hair', 'face', 'shirt', 'pants', 'shoes', 'accessory1', 'accessory2',
 ];
 
-/**
- * Validates the incoming request body and returns a typed object
- * or an error message string.
- *
- * Checks:
- *   - apiKey is a non-empty string
- *   - robloxUserId is a positive number
- *   - robloxUsername is a non-empty string
- *   - items is an object with valid category keys
- *   - At least one item slot is filled (non-null)
- *   - All provided asset IDs are positive numbers
- */
+// ---------------------------------------------------------------------------
+// Validation
+// ---------------------------------------------------------------------------
+
 function validateRequest(
   body: unknown,
-): { valid: true; data: GameSubmitRequest } | { valid: false; error: string } {
+): { valid: true; data: { apiKey: string; robloxUserId: number; robloxUsername: string; outfitName?: string; items: GameItemsMap } } | { valid: false; error: string } {
   if (!body || typeof body !== 'object') {
     return { valid: false, error: 'Request body must be a JSON object.' };
   }
 
   const b = body as Record<string, unknown>;
 
-  // --- API key ---
   if (typeof b.apiKey !== 'string' || b.apiKey.trim().length === 0) {
     return { valid: false, error: 'Missing or invalid apiKey.' };
   }
-
-  // --- Roblox user ID ---
   if (typeof b.robloxUserId !== 'number' || b.robloxUserId <= 0) {
     return { valid: false, error: 'Missing or invalid robloxUserId.' };
   }
-
-  // --- Roblox username ---
   if (typeof b.robloxUsername !== 'string' || b.robloxUsername.trim().length === 0) {
     return { valid: false, error: 'Missing or invalid robloxUsername.' };
   }
-
-  // --- Items object ---
   if (!b.items || typeof b.items !== 'object') {
     return { valid: false, error: 'Missing or invalid items object.' };
   }
 
   const items = b.items as Record<string, unknown>;
 
-  // Check that all keys are valid categories
   for (const key of Object.keys(items)) {
     if (!VALID_CATEGORIES.includes(key as CategoryKey)) {
       return { valid: false, error: `Invalid item category: "${key}".` };
     }
   }
 
-  // Check that all values are either null or positive numbers
-  for (const [key, value] of Object.entries(items)) {
-    if (value !== null && value !== undefined) {
-      if (typeof value !== 'number' || value <= 0) {
-        return {
-          valid: false,
-          error: `Invalid asset ID for "${key}": must be a positive number or null.`,
-        };
-      }
+  // Items can be either numbers (old format) or objects (new format with name/price)
+  let hasAtLeastOneItem = false;
+  for (const [, value] of Object.entries(items)) {
+    if (value === null || value === undefined) continue;
+    if (typeof value === 'number' && value > 0) {
+      hasAtLeastOneItem = true;
+    } else if (typeof value === 'object' && value !== null && typeof (value as GameItem).id === 'number') {
+      hasAtLeastOneItem = true;
     }
   }
 
-  // Ensure at least one item slot is filled
-  const hasAtLeastOneItem = Object.values(items).some(
-    (v) => typeof v === 'number' && v > 0,
-  );
-
   if (!hasAtLeastOneItem) {
-    return {
-      valid: false,
-      error: 'Outfit must contain at least one item.',
-    };
+    return { valid: false, error: 'Outfit must contain at least one item.' };
   }
 
   return {
@@ -172,7 +90,7 @@ function validateRequest(
         typeof b.outfitName === 'string' && b.outfitName.trim().length > 0
           ? b.outfitName.trim()
           : undefined,
-      items: items as Partial<Record<CategoryKey, number | null>>,
+      items: items as GameItemsMap,
     },
   };
 }
@@ -181,15 +99,8 @@ function validateRequest(
 // Route Handler
 // ---------------------------------------------------------------------------
 
-/**
- * POST /api/game/submit-outfit
- *
- * Receives an outfit submission from the Roblox game, resolves all item
- * details via the Roblox API, and saves the outfit to the database.
- */
 export async function POST(req: Request) {
   try {
-    // --- Parse and validate the request body ---
     const body = await req.json().catch(() => null);
     const validation = validateRequest(body);
 
@@ -203,19 +114,15 @@ export async function POST(req: Request) {
     const { apiKey, robloxUserId, robloxUsername, outfitName, items } =
       validation.data;
 
-    // --- Authenticate the game server ---
+    // --- Authenticate ---
     const expectedKey = process.env.GAME_API_KEY;
-
     if (!expectedKey) {
-      console.error(
-        '[game/submit-outfit] GAME_API_KEY environment variable is not set.',
-      );
+      console.error('[game/submit-outfit] GAME_API_KEY not set.');
       return NextResponse.json(
         { success: false, error: 'Server configuration error.' },
         { status: 500 },
       );
     }
-
     if (apiKey !== expectedKey) {
       return NextResponse.json(
         { success: false, error: 'Invalid API key.' },
@@ -223,61 +130,111 @@ export async function POST(req: Request) {
       );
     }
 
-    // --- Find or create the user account ---
-    // If a website user has linked their Roblox account (robloxUserId field),
-    // we use that account. Otherwise, we create a new user with the Roblox
-    // username as a placeholder.
+    // --- Find or create user ---
     let user = await prisma.user.findFirst({
       where: { robloxUserId: robloxUserId },
     });
 
     if (!user) {
-      // No linked account found — check if a user with this Roblox username exists
-      // (they may have signed up on the website with the same name)
       user = await prisma.user.findUnique({
         where: { username: robloxUsername },
       });
 
       if (user) {
-        // Link the existing website account to this Roblox user ID
         user = await prisma.user.update({
           where: { id: user.id },
           data: { robloxUserId },
         });
       } else {
-        // Create a new account for this Roblox player
-        // Password is set to a random placeholder since they authenticate via the game
         user = await prisma.user.create({
           data: {
             username: robloxUsername,
-            password: `roblox_${robloxUserId}_${Date.now()}`, // Not used for login
+            password: `roblox_${robloxUserId}_${Date.now()}`,
             robloxUserId,
           },
         });
       }
     }
 
-    // --- Resolve item details and thumbnails from Roblox API ---
-    // The game only sends asset IDs; we need to fetch the full details
-    // (name, thumbnail URL, price, etc.) from Roblox's servers.
-    const resolvedItems = await resolveOutfitItems(items);
+    // --- Build resolved items from game data ---
+    // Extract asset IDs and game-provided metadata
+    const assetIds: number[] = [];
+    const itemDataMap = new Map<number, { name: string; price: number | null }>();
 
-    // --- Use screenshot from game if provided, otherwise skip ---
+    for (const [, value] of Object.entries(items)) {
+      if (value === null || value === undefined) continue;
+
+      if (typeof value === 'number' && value > 0) {
+        assetIds.push(value);
+      } else if (typeof value === 'object' && value !== null) {
+        const item = value as GameItem;
+        if (item.id > 0) {
+          assetIds.push(item.id);
+          itemDataMap.set(item.id, {
+            name: item.name ?? `Item #${item.id}`,
+            price: typeof item.price === 'number' ? item.price : null,
+          });
+        }
+      }
+    }
+
+    // Fetch web-compatible thumbnail URLs (game sends rbxthumb:// which only works in Roblox)
+    const thumbnailMap = await fetchAssetThumbnails(assetIds);
+
+    // Build the final resolved items object (same format the website expects)
+    const allCategories: CategoryKey[] = [
+      'hat', 'hair', 'face', 'shirt', 'pants', 'shoes', 'accessory1', 'accessory2',
+    ];
+
+    const resolvedItems: Record<string, { id: number; name: string; thumbnailUrl: string | null; price: number | null; creatorName?: string; assetTypeId?: number } | null> = {};
+
+    for (const category of allCategories) {
+      const value = items[category];
+
+      if (value === null || value === undefined) {
+        resolvedItems[category] = null;
+        continue;
+      }
+
+      let assetId: number;
+      let name: string;
+      let price: number | null;
+
+      if (typeof value === 'number') {
+        assetId = value;
+        name = `Item #${value}`;
+        price = null;
+      } else {
+        const item = value as GameItem;
+        assetId = item.id;
+        name = item.name ?? `Item #${item.id}`;
+        price = typeof item.price === 'number' ? item.price : null;
+      }
+
+      resolvedItems[category] = {
+        id: assetId,
+        name,
+        thumbnailUrl: thumbnailMap.get(assetId) ?? null,
+        price,
+      };
+    }
+
+    // --- Screenshot from game ---
     const screenshotUrl =
       typeof (body as Record<string, unknown>).screenshotUrl === 'string'
         ? ((body as Record<string, unknown>).screenshotUrl as string)
         : null;
 
-    // --- Save the outfit to the database ---
+    // --- Save to database ---
     const outfit = await prisma.outfit.create({
       data: {
         name: outfitName ?? null,
         buildJson: JSON.stringify(resolvedItems),
-        customImage: screenshotUrl, // Screenshot captured in-game via CaptureService
-        isPublic: true, // Game-submitted outfits default to public
+        customImage: screenshotUrl,
+        isPublic: true,
         voteScore: 0,
         ownerId: user.id,
-        source: 'game', // Track that this came from the Roblox game
+        source: 'game',
       },
       include: { owner: true },
     });
@@ -286,7 +243,6 @@ export async function POST(req: Request) {
       `[game/submit-outfit] Outfit #${outfit.id} created by ${robloxUsername} (Roblox ID: ${robloxUserId})`,
     );
 
-    // --- Return the created outfit ---
     return NextResponse.json(
       {
         success: true,
@@ -296,7 +252,6 @@ export async function POST(req: Request) {
           owner: outfit.owner.username,
           isPublic: outfit.isPublic,
           voteScore: outfit.voteScore,
-          screenshotUrl,
         },
       },
       { status: 201 },
