@@ -1,0 +1,31 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  username  String   @unique
+  password  String
+  outfits   Outfit[]
+  createdAt DateTime @default(now())
+}
+
+model Outfit {
+  id          Int      @id @default(autoincrement())
+  name        String?
+  buildJson   String
+  customImage String?  // <- base64 data URL for the uploaded image
+  isPublic    Boolean  @default(false)
+  voteScore   Int      @default(0)
+  owner       User     @relation(fields: [ownerId], references: [id])
+  ownerId     Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
