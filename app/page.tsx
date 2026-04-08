@@ -127,79 +127,50 @@ type ApiOutfit = {
   customImageUrl?: string | null;
 };
 
-function LargeOutfitPreview({ build }: { build: BuildState }) {
-  const hasAny = Object.values(build).some((b) => b !== null);
+function OutfitThumbnailGrid({ build, customImageUrl }: { build: BuildState; customImageUrl?: string }) {
+  // If there's a custom image (screenshot from game), show that
+  if (customImageUrl) {
+    return (
+      <img
+        src={customImageUrl}
+        alt="Outfit preview"
+        className="w-40 h-40 md:w-48 md:h-48 object-cover rounded-lg"
+      />
+    );
+  }
+
+  // Otherwise show a 4x2 grid of item thumbnails
+  const slots: { key: CategoryKey; label: string }[] = [
+    { key: 'hat', label: 'Hat' },
+    { key: 'hair', label: 'Hair' },
+    { key: 'face', label: 'Face' },
+    { key: 'shirt', label: 'Shirt' },
+    { key: 'pants', label: 'Pants' },
+    { key: 'shoes', label: 'Shoes' },
+    { key: 'accessory1', label: 'Acc 1' },
+    { key: 'accessory2', label: 'Acc 2' },
+  ];
+
+  const filledCount = slots.filter(s => build[s.key] !== null).length;
 
   return (
-    <div className="relative w-32 h-32 md:w-36 md:h-36 rounded bg-zinc-900 overflow-hidden flex items-center justify-center">
-      <div className="absolute inset-0">
-        <div className="absolute left-[38%] top-[18%] w-[24%] h-[24%] rounded-full bg-zinc-800/80" />
-        <div className="absolute left-[36%] top-[38%] w-[28%] h-[30%] bg-zinc-800/80 rounded" />
-        <div className="absolute left-[40%] top-[65%] w-[7%] h-[18%] bg-zinc-800/80 rounded" />
-        <div className="absolute left-[53%] top-[65%] w-[7%] h-[18%] bg-zinc-800/80 rounded" />
+    <div className="w-40 md:w-48 rounded-lg bg-zinc-900 border border-zinc-800 p-2">
+      <div className="grid grid-cols-4 gap-1">
+        {slots.map(({ key, label }) => {
+          const item = build[key];
+          return (
+            <div key={key} className="aspect-square rounded bg-zinc-800/60 overflow-hidden flex items-center justify-center" title={item ? item.name : label}>
+              {item?.thumbnailUrl ? (
+                <img src={item.thumbnailUrl} alt={item.name} className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-[7px] text-zinc-600">{label}</span>
+              )}
+            </div>
+          );
+        })}
       </div>
-
-      {!hasAny && (
-        <span className="text-[10px] text-zinc-500 text-center px-2">
-          Empty build
-        </span>
-      )}
-
-      {build.pants?.thumbnailUrl && (
-        <img
-          src={build.pants.thumbnailUrl}
-          alt={build.pants.name}
-          className="absolute bottom-2 w-24 h-24 object-contain"
-        />
-      )}
-      {build.shoes?.thumbnailUrl && (
-        <img
-          src={build.shoes.thumbnailUrl}
-          alt={build.shoes.name}
-          className="absolute bottom-0 w-24 h-24 object-contain"
-        />
-      )}
-      {build.shirt?.thumbnailUrl && (
-        <img
-          src={build.shirt.thumbnailUrl}
-          alt={build.shirt.name}
-          className="absolute w-28 h-28 object-contain"
-        />
-      )}
-      {build.accessory1?.thumbnailUrl && (
-        <img
-          src={build.accessory1.thumbnailUrl}
-          alt={build.accessory1.name}
-          className="absolute -left-3 w-20 h-20 object-contain"
-        />
-      )}
-      {build.accessory2?.thumbnailUrl && (
-        <img
-          src={build.accessory2.thumbnailUrl}
-          alt={build.accessory2.name}
-          className="absolute -right-3 w-20 h-20 object-contain"
-        />
-      )}
-      {build.face?.thumbnailUrl && (
-        <img
-          src={build.face.thumbnailUrl}
-          alt={build.face.name}
-          className="absolute -top-1 w-18 h-18 object-contain"
-        />
-      )}
-      {build.hair?.thumbnailUrl && (
-        <img
-          src={build.hair.thumbnailUrl}
-          alt={build.hair.name}
-          className="absolute -top-2 w-20 h-20 object-contain"
-        />
-      )}
-      {build.hat?.thumbnailUrl && (
-        <img
-          src={build.hat.thumbnailUrl}
-          alt={build.hat.name}
-          className="absolute -top-3 w-20 h-20 object-contain"
-        />
+      {filledCount > 0 && (
+        <div className="text-[9px] text-zinc-500 text-center mt-1">{filledCount}/8 items</div>
       )}
     </div>
   );
@@ -256,7 +227,6 @@ export default function HomePage() {
 
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [pendingName, setPendingName] = useState('');
-  const [pendingImageUrl, setPendingImageUrl] = useState<string | null>(null);
 
   const selectedCategoryLabel = useMemo(() => {
     const def = CATEGORY_DEFS.find((c) => c.key === selectedCategoryKey);
@@ -473,7 +443,7 @@ export default function HomePage() {
           username: currentUser,
           name: pendingName,
           build,
-          customImageUrl: pendingImageUrl, // base64 data URL or null
+
         }),
       });
 
@@ -501,7 +471,6 @@ export default function HomePage() {
 
       setShowSaveDialog(false);
       setPendingName('');
-      setPendingImageUrl(null);
       handleResetBuild();
       setActiveTab('your');
     } catch (err) {
@@ -513,10 +482,47 @@ export default function HomePage() {
   function cancelSaveDialog() {
     setShowSaveDialog(false);
     setPendingName('');
-    setPendingImageUrl(null);
+  }
+
+  // Load persisted votes from localStorage
+  useEffect(() => {
+    if (!currentUser) return;
+    const stored = window.localStorage.getItem(`rdh_votes_${currentUser}`);
+    if (stored) {
+      try {
+        const votesMap = JSON.parse(stored) as Record<string, 'up' | 'down'>;
+        setSavedBuilds((prev) =>
+          prev.map((o) => ({
+            ...o,
+            userVote: votesMap[String(o.id)] ?? null,
+          })),
+        );
+      } catch {}
+    }
+  }, [currentUser, savedBuilds.length > 0 ? 'loaded' : 'empty']);
+
+  function persistVote(outfitId: number, vote: 'up' | 'down' | null) {
+    if (!currentUser) return;
+    const key = `rdh_votes_${currentUser}`;
+    let votesMap: Record<string, string> = {};
+    try {
+      const stored = window.localStorage.getItem(key);
+      if (stored) votesMap = JSON.parse(stored);
+    } catch {}
+    if (vote) {
+      votesMap[String(outfitId)] = vote;
+    } else {
+      delete votesMap[String(outfitId)];
+    }
+    window.localStorage.setItem(key, JSON.stringify(votesMap));
   }
 
   async function handleVote(outfitId: number, direction: 'up' | 'down') {
+    if (!currentUser) {
+      alert('Please sign in to vote.');
+      return;
+    }
+
     setSavedBuilds((prev) => {
       let deltaForServer = 0;
 
@@ -553,11 +559,11 @@ export default function HomePage() {
         }
 
         deltaForServer = voteScore - prevScore;
+        persistVote(outfitId, userVote);
 
         return { ...outfit, voteScore, userVote };
       });
 
-      // fire and forget to backend
       if (deltaForServer !== 0) {
         fetch('/api/outfits/vote', {
           method: 'POST',
@@ -1010,15 +1016,7 @@ export default function HomePage() {
                     className="border border-zinc-800 rounded-lg p-4 bg-zinc-950 flex flex-col md:flex-row gap-4"
                   >
                     <div className="flex-shrink-0 flex items-center justify-center">
-                      {saved.customImageUrl ? (
-                        <img
-                          src={saved.customImageUrl}
-                          alt={saved.name || 'Outfit image'}
-                          className="w-32 h-32 md:w-36 md:h-36 object-cover rounded"
-                        />
-                      ) : (
-                        <LargeOutfitPreview build={saved.build} />
-                      )}
+                      <OutfitThumbnailGrid build={saved.build} customImageUrl={saved.customImageUrl} />
                     </div>
                     <div className="flex-1 text-sm">
                       <div className="mb-3 flex items-center justify-between gap-3">
@@ -1172,15 +1170,7 @@ export default function HomePage() {
                     className="border border-zinc-800 rounded-lg p-4 bg-zinc-950 flex flex-col md:flex-row gap-4"
                   >
                     <div className="flex-shrink-0 flex items-center justify-center">
-                      {saved.customImageUrl ? (
-                        <img
-                          src={saved.customImageUrl}
-                          alt={saved.name || 'Outfit image'}
-                          className="w-32 h-32 md:w-36 md:h-36 object-cover rounded"
-                        />
-                      ) : (
-                        <LargeOutfitPreview build={saved.build} />
-                      )}
+                      <OutfitThumbnailGrid build={saved.build} customImageUrl={saved.customImageUrl} />
                     </div>
                     <div className="flex-1 text-sm">
                       <div className="mb-3 flex items-center justify-between gap-3">
@@ -1212,7 +1202,8 @@ export default function HomePage() {
                             <button
                               type="button"
                               onClick={() => handleVote(saved.id, 'up')}
-                              className={`px-2 py-1 rounded-full border flex items-center gap-1 ${
+                              disabled={saved.owner === currentUser}
+                              className={`px-2 py-1 rounded-full border flex items-center gap-1 disabled:opacity-30 disabled:cursor-not-allowed ${
                                 userVote === 'up'
                                   ? 'bg-emerald-500 text-black border-emerald-400'
                                   : 'border-zinc-700 text-zinc-200 hover:bg-zinc-800'
@@ -1223,7 +1214,8 @@ export default function HomePage() {
                             <button
                               type="button"
                               onClick={() => handleVote(saved.id, 'down')}
-                              className={`px-2 py-1 rounded-full border flex items-center gap-1 ${
+                              disabled={saved.owner === currentUser}
+                              className={`px-2 py-1 rounded-full border flex items-center gap-1 disabled:opacity-30 disabled:cursor-not-allowed ${
                                 userVote === 'down'
                                   ? 'bg-red-500 text-black border-red-400'
                                   : 'border-zinc-700 text-zinc-200 hover:bg-zinc-800'
@@ -1319,8 +1311,7 @@ export default function HomePage() {
           <div className="bg-zinc-950 border border-zinc-700 rounded-xl p-5 w-full max-w-md shadow-xl">
             <h2 className="text-lg font-semibold mb-3">Save outfit</h2>
             <p className="text-xs text-zinc-400 mb-4">
-              Give your outfit a name and optionally upload a custom image. The
-              image will be saved with your outfit and show on the leaderboard.
+              Give your outfit a name. It will appear on the leaderboard once you make it public.
             </p>
 
             <div className="flex flex-col gap-3">
@@ -1334,46 +1325,6 @@ export default function HomePage() {
                   className="w-full px-3 py-2 rounded bg-zinc-900 border border-zinc-700 text-sm text-white"
                   placeholder="e.g. Cozy winter fit"
                 />
-              </div>
-
-              <div>
-                <label className="block text-xs text-zinc-400 mb-1">
-                  Upload image (optional)
-                </label>
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="text-xs text-zinc-300"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (!file) {
-                      setPendingImageUrl(null);
-                      return;
-                    }
-
-                    const reader = new FileReader();
-                    reader.onload = () => {
-                      const result = reader.result;
-                      if (typeof result === 'string') {
-                        // base64 data URL like "data:image/png;base64,..."
-                        setPendingImageUrl(result);
-                      }
-                    };
-                    reader.readAsDataURL(file);
-                  }}
-                />
-                {pendingImageUrl && (
-                  <div className="mt-2">
-                    <div className="text-xs text-zinc-400 mb-1">
-                      Preview of uploaded image:
-                    </div>
-                    <img
-                      src={pendingImageUrl}
-                      alt="Uploaded preview"
-                      className="w-32 h-32 object-cover rounded border border-zinc-700"
-                    />
-                  </div>
-                )}
               </div>
             </div>
 
