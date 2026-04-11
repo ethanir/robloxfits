@@ -219,28 +219,54 @@ export async function POST(req: Request) {
       };
     }
 
-    // Resolve screenshot asset ID to a viewable thumbnail URL
+    // Resolve screenshot asset ID to a viewable image URL
     let screenshotUrl: string | null = null;
     const rawScreenshotId = (body as Record<string, unknown>).screenshotUrl;
     if (typeof rawScreenshotId === 'string' && rawScreenshotId.length > 0) {
       try {
-        const thumbRes = await fetch(
-          `https://thumbnails.roblox.com/v1/assets?assetIds=${rawScreenshotId}&returnPolicy=PlaceHolder&size=420x420&format=Png`,
-          { cache: 'no-store' },
+        // Try asset delivery API - returns JSON with location field
+        const assetRes = await fetch(
+          `https://assetdelivery.roblox.com/v1/asset/?id=${rawScreenshotId}`,
+          { redirect: 'follow' },
         );
-        if (thumbRes.ok) {
-          const thumbData = await thumbRes.json();
-          const entry = thumbData?.data?.[0];
-          if (entry?.imageUrl) {
-            screenshotUrl = entry.imageUrl;
+        const contentType = assetRes.headers.get('content-type') || '';
+        if (contentType.includes('image')) {
+          // Direct image URL
+          screenshotUrl = `https://assetdelivery.roblox.com/v1/asset/?id=${rawScreenshotId}`;
+        } else if (assetRes.ok) {
+          const text = await assetRes.text();
+          try {
+            const json = JSON.parse(text);
+            if (json?.location) {
+              screenshotUrl = json.location;
+            }
+          } catch {
+            // Not JSON, maybe it's the raw image served with wrong content-type
+            screenshotUrl = `https://assetdelivery.roblox.com/v1/asset/?id=${rawScreenshotId}`;
           }
         }
-        // Fallback: direct asset URL
-        if (!screenshotUrl) {
-          screenshotUrl = `https://assetdelivery.roblox.com/v1/asset/?id=${rawScreenshotId}`;
-        }
       } catch (e) {
-        console.warn('[game/submit-outfit] Failed to resolve screenshot thumbnail:', e);
+        console.warn('[game/submit-outfit] Asset delivery failed:', e);
+      }
+
+      // Fallback: try thumbnails API
+      if (!screenshotUrl) {
+        try {
+          const thumbRes = await fetch(
+            `https://thumbnails.roblox.com/v1/assets?assetIds=${rawScreenshotId}&returnPolicy=PlaceHolder&size=420x420&format=Png`,
+          );
+          if (thumbRes.ok) {
+            const thumbData = await thumbRes.json();
+            const entry = thumbData?.data?.[0];
+            if (entry?.imageUrl && !entry.imageUrl.includes('placeholder')) {
+              screenshotUrl = entry.imageUrl;
+            }
+          }
+        } catch {}
+      }
+
+      // Last fallback: store raw ID, resolve on display
+      if (!screenshotUrl) {
         screenshotUrl = `https://assetdelivery.roblox.com/v1/asset/?id=${rawScreenshotId}`;
       }
     }
