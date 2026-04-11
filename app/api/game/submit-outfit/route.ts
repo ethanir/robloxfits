@@ -219,11 +219,26 @@ export async function POST(req: Request) {
       };
     }
 
-    // --- Screenshot from game ---
-    const screenshotUrl =
-      typeof (body as Record<string, unknown>).screenshotUrl === 'string'
-        ? ((body as Record<string, unknown>).screenshotUrl as string)
-        : null;
+    // Resolve screenshot asset ID to a viewable thumbnail URL
+    let screenshotUrl: string | null = null;
+    const rawScreenshotId = (body as Record<string, unknown>).screenshotUrl;
+    if (typeof rawScreenshotId === 'string' && rawScreenshotId.length > 0) {
+      try {
+        const thumbRes = await fetch(
+          `https://thumbnails.roblox.com/v1/assets?assetIds=${rawScreenshotId}&returnPolicy=PlaceHolder&size=420x420&format=Png`,
+          { cache: 'no-store' },
+        );
+        if (thumbRes.ok) {
+          const thumbData = await thumbRes.json();
+          const entry = thumbData?.data?.[0];
+          if (entry?.imageUrl) {
+            screenshotUrl = entry.imageUrl;
+          }
+        }
+      } catch (e) {
+        console.warn('[game/submit-outfit] Failed to resolve screenshot thumbnail:', e);
+      }
+    }
 
     // --- Save to database ---
     const outfit = await prisma.outfit.create({
