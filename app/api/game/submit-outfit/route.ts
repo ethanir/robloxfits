@@ -235,8 +235,13 @@ export async function POST(req: Request) {
             screenshotUrl = entry.imageUrl;
           }
         }
+        // Fallback: direct asset URL
+        if (!screenshotUrl) {
+          screenshotUrl = `https://assetdelivery.roblox.com/v1/asset/?id=${rawScreenshotId}`;
+        }
       } catch (e) {
         console.warn('[game/submit-outfit] Failed to resolve screenshot thumbnail:', e);
+        screenshotUrl = `https://assetdelivery.roblox.com/v1/asset/?id=${rawScreenshotId}`;
       }
     }
 
